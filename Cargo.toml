@@ -3,7 +3,7 @@ name = "uia-mcp"
 version = "1.0.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/josephwander-arch/uia-mcp"
+repository = "https://github.com/AIWander/uia-mcp"
 description = "Windows UI Automation shared library for CPC servers (element inspection, focus, input)"
 
 [lib]
