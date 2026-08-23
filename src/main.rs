@@ -1,9 +1,9 @@
 //! Rust UI Automation MCP Server (stdio)
 //! Thin MCP protocol wrapper that delegates to uia_lib.
 
-use std::io::{self, BufRead, Write};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::io::{self, BufRead, Write};
 
 // ============ MCP PROTOCOL ============
 
@@ -89,7 +89,7 @@ fn handle_request(request: &JsonRpcRequest) -> JsonRpcResponse {
                 })),
                 error: None,
             }
-        },
+        }
 
         _ => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
@@ -109,11 +109,12 @@ fn main() {
     // Debug: log startup to temp file so we can verify Claude Code launches this
     let _ = std::fs::write(
         std::env::temp_dir().join("uia_mcp_started.txt"),
-        format!("UIA MCP started at {:?}\nPID: {}\nArgs: {:?}\n",
+        format!(
+            "UIA MCP started at {:?}\nPID: {}\nArgs: {:?}\n",
             std::time::SystemTime::now(),
             std::process::id(),
             std::env::args().collect::<Vec<_>>()
-        )
+        ),
     );
 
     let stdin = io::stdin();

@@ -4,19 +4,15 @@
 // Allow Windows API naming conventions (UIA_ButtonControlTypeId etc.)
 #![allow(non_upper_case_globals)]
 
-use std::sync::{Mutex, OnceLock};
-use std::collections::VecDeque;
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::collections::VecDeque;
+use std::sync::{Mutex, OnceLock};
 
 #[cfg(windows)]
 use windows::{
-    core::*,
-    Win32::Foundation::*,
-    Win32::UI::Accessibility::*,
-    Win32::UI::WindowsAndMessaging::*,
-    Win32::UI::Input::KeyboardAndMouse::*,
-    Win32::System::Com::*,
+    core::*, Win32::Foundation::*, Win32::System::Com::*, Win32::UI::Accessibility::*,
+    Win32::UI::Input::KeyboardAndMouse::*, Win32::UI::WindowsAndMessaging::*,
 };
 // ============ DATA TYPES ============
 
@@ -70,9 +66,17 @@ fn element_to_ui_element(element: &IUIAutomationElement) -> Option<UiElement> {
     unsafe {
         let name = element.CurrentName().ok()?.to_string();
         let control_type_id = element.CurrentControlType().ok()?;
-        let class_name = element.CurrentClassName().ok().map(|s| s.to_string()).unwrap_or_default();
-        let automation_id = element.CurrentAutomationId().ok().map(|s| s.to_string()).unwrap_or_default();
-        
+        let class_name = element
+            .CurrentClassName()
+            .ok()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let automation_id = element
+            .CurrentAutomationId()
+            .ok()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+
         let rect_raw = element.CurrentBoundingRectangle().ok()?;
         let rect = Rect {
             x: rect_raw.left,
@@ -80,12 +84,12 @@ fn element_to_ui_element(element: &IUIAutomationElement) -> Option<UiElement> {
             width: rect_raw.right - rect_raw.left,
             height: rect_raw.bottom - rect_raw.top,
         };
-        
+
         let is_enabled = element.CurrentIsEnabled().ok()?.as_bool();
         let is_offscreen = element.CurrentIsOffscreen().ok()?.as_bool();
-        
+
         let control_type = control_type_to_string(control_type_id);
-        
+
         Some(UiElement {
             name,
             control_type,
@@ -145,68 +149,84 @@ fn control_type_to_string(ct: UIA_CONTROLTYPE_ID) -> String {
         UIA_SemanticZoomControlTypeId => "SemanticZoom",
         UIA_AppBarControlTypeId => "AppBar",
         _ => "Unknown",
-    }.to_string()
+    }
+    .to_string()
 }
 
 #[cfg(windows)]
-fn collect_elements(element: &IUIAutomationElement, automation: &IUIAutomation, depth: u32, max_depth: u32, include_invisible: bool) -> Vec<UiElement> {
+fn collect_elements(
+    element: &IUIAutomationElement,
+    automation: &IUIAutomation,
+    depth: u32,
+    max_depth: u32,
+    include_invisible: bool,
+) -> Vec<UiElement> {
     let mut elements = Vec::new();
-    
+
     if depth > max_depth {
         return elements;
     }
-    
+
     if let Some(ui_elem) = element_to_ui_element(element) {
         if include_invisible || ui_elem.is_visible {
             elements.push(ui_elem);
         }
     }
-    
+
     unsafe {
         if let Ok(condition) = automation.CreateTrueCondition() {
             if let Ok(children) = element.FindAll(TreeScope_Children, &condition) {
                 if let Ok(length) = children.Length() {
                     for i in 0..length {
                         if let Ok(child) = children.GetElement(i) {
-                            elements.extend(collect_elements(&child, automation, depth + 1, max_depth, include_invisible));
+                            elements.extend(collect_elements(
+                                &child,
+                                automation,
+                                depth + 1,
+                                max_depth,
+                                include_invisible,
+                            ));
                         }
                     }
                 }
             }
         }
     }
-    
+
     elements
 }
 
 #[cfg(windows)]
 fn get_visible_windows() -> Vec<WindowInfo> {
     let mut windows = Vec::new();
-    
+
     unsafe {
-        let _ = EnumWindows(Some(enum_windows_callback), LPARAM(&mut windows as *mut _ as isize));
+        let _ = EnumWindows(
+            Some(enum_windows_callback),
+            LPARAM(&mut windows as *mut _ as isize),
+        );
     }
-    
+
     windows
 }
 
 #[cfg(windows)]
 unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let windows = &mut *(lparam.0 as *mut Vec<WindowInfo>);
-    
+
     if IsWindowVisible(hwnd).as_bool() {
         let mut title = [0u16; 256];
         let len = GetWindowTextW(hwnd, &mut title);
         let title = String::from_utf16_lossy(&title[..len as usize]);
-        
+
         if !title.is_empty() {
             let mut class_name = [0u16; 256];
             let class_len = GetClassNameW(hwnd, &mut class_name);
             let class_name = String::from_utf16_lossy(&class_name[..class_len as usize]);
-            
+
             let mut rect = RECT::default();
             let _ = GetWindowRect(hwnd, &mut rect);
-            
+
             windows.push(WindowInfo {
                 hwnd: format!("{:?}", hwnd),
                 title,
@@ -221,7 +241,7 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
             });
         }
     }
-    
+
     TRUE
 }
 
@@ -231,8 +251,14 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
 fn uia_click(args: &Value) -> Value {
     let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-    let button = args.get("button").and_then(|v| v.as_str()).unwrap_or("left");
-    let double_click = args.get("double_click").and_then(|v| v.as_bool()).unwrap_or(false);
+    let button = args
+        .get("button")
+        .and_then(|v| v.as_str())
+        .unwrap_or("left");
+    let double_click = args
+        .get("double_click")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     unsafe {
         use windows::Win32::UI::Input::KeyboardAndMouse::*;
@@ -252,17 +278,29 @@ fn uia_click(args: &Value) -> Value {
             let inputs = [
                 INPUT {
                     r#type: INPUT_MOUSE,
-                    Anonymous: INPUT_0 { mi: MOUSEINPUT {
-                        dx: 0, dy: 0, mouseData: 0,
-                        dwFlags: down_flag, time: 0, dwExtraInfo: 0,
-                    }},
+                    Anonymous: INPUT_0 {
+                        mi: MOUSEINPUT {
+                            dx: 0,
+                            dy: 0,
+                            mouseData: 0,
+                            dwFlags: down_flag,
+                            time: 0,
+                            dwExtraInfo: 0,
+                        },
+                    },
                 },
                 INPUT {
                     r#type: INPUT_MOUSE,
-                    Anonymous: INPUT_0 { mi: MOUSEINPUT {
-                        dx: 0, dy: 0, mouseData: 0,
-                        dwFlags: up_flag, time: 0, dwExtraInfo: 0,
-                    }},
+                    Anonymous: INPUT_0 {
+                        mi: MOUSEINPUT {
+                            dx: 0,
+                            dy: 0,
+                            mouseData: 0,
+                            dwFlags: up_flag,
+                            time: 0,
+                            dwExtraInfo: 0,
+                        },
+                    },
                 },
             ];
             SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -291,21 +329,27 @@ fn uia_type_text(args: &Value) -> Value {
             let inputs = [
                 INPUT {
                     r#type: INPUT_KEYBOARD,
-                    Anonymous: INPUT_0 { ki: KEYBDINPUT {
-                        wVk: VIRTUAL_KEY(0),
-                        wScan: ch,
-                        dwFlags: KEYEVENTF_UNICODE,
-                        time: 0, dwExtraInfo: 0,
-                    }},
+                    Anonymous: INPUT_0 {
+                        ki: KEYBDINPUT {
+                            wVk: VIRTUAL_KEY(0),
+                            wScan: ch,
+                            dwFlags: KEYEVENTF_UNICODE,
+                            time: 0,
+                            dwExtraInfo: 0,
+                        },
+                    },
                 },
                 INPUT {
                     r#type: INPUT_KEYBOARD,
-                    Anonymous: INPUT_0 { ki: KEYBDINPUT {
-                        wVk: VIRTUAL_KEY(0),
-                        wScan: ch,
-                        dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
-                        time: 0, dwExtraInfo: 0,
-                    }},
+                    Anonymous: INPUT_0 {
+                        ki: KEYBDINPUT {
+                            wVk: VIRTUAL_KEY(0),
+                            wScan: ch,
+                            dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+                            time: 0,
+                            dwExtraInfo: 0,
+                        },
+                    },
                 },
             ];
             SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -329,7 +373,9 @@ fn uia_focus_window(args: &Value) -> Value {
     let filter = title_filter.unwrap().to_lowercase();
 
     let windows = get_visible_windows();
-    let found = windows.iter().find(|w| w.title.to_lowercase().contains(&filter));
+    let found = windows
+        .iter()
+        .find(|w| w.title.to_lowercase().contains(&filter));
 
     match found {
         Some(win) => {
@@ -400,9 +446,18 @@ fn key_name_to_vk(name: &str) -> Option<VIRTUAL_KEY> {
         "down" => VK_DOWN,
         "left" => VK_LEFT,
         "right" => VK_RIGHT,
-        "f1" => VK_F1, "f2" => VK_F2, "f3" => VK_F3, "f4" => VK_F4,
-        "f5" => VK_F5, "f6" => VK_F6, "f7" => VK_F7, "f8" => VK_F8,
-        "f9" => VK_F9, "f10" => VK_F10, "f11" => VK_F11, "f12" => VK_F12,
+        "f1" => VK_F1,
+        "f2" => VK_F2,
+        "f3" => VK_F3,
+        "f4" => VK_F4,
+        "f5" => VK_F5,
+        "f6" => VK_F6,
+        "f7" => VK_F7,
+        "f8" => VK_F8,
+        "f9" => VK_F9,
+        "f10" => VK_F10,
+        "f11" => VK_F11,
+        "f12" => VK_F12,
         "capslock" => VK_CAPITAL,
         "numlock" => VK_NUMLOCK,
         "scrolllock" => VK_SCROLL,
@@ -442,39 +497,59 @@ fn send_key_combo(modifiers: &[VIRTUAL_KEY], key: VIRTUAL_KEY) {
         for m in modifiers {
             inputs.push(INPUT {
                 r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 { ki: KEYBDINPUT {
-                    wVk: *m, wScan: 0,
-                    dwFlags: KEYBD_EVENT_FLAGS(0), time: 0, dwExtraInfo: 0,
-                }},
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: *m,
+                        wScan: 0,
+                        dwFlags: KEYBD_EVENT_FLAGS(0),
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
             });
         }
 
         // Press main key down
         inputs.push(INPUT {
             r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 { ki: KEYBDINPUT {
-                wVk: key, wScan: 0,
-                dwFlags: KEYBD_EVENT_FLAGS(0), time: 0, dwExtraInfo: 0,
-            }},
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: key,
+                    wScan: 0,
+                    dwFlags: KEYBD_EVENT_FLAGS(0),
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
         });
 
         // Release main key
         inputs.push(INPUT {
             r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 { ki: KEYBDINPUT {
-                wVk: key, wScan: 0,
-                dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0,
-            }},
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: key,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
         });
 
         // Release modifiers in reverse
         for m in modifiers.iter().rev() {
             inputs.push(INPUT {
                 r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 { ki: KEYBDINPUT {
-                    wVk: *m, wScan: 0,
-                    dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0,
-                }},
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: *m,
+                        wScan: 0,
+                        dwFlags: KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
             });
         }
 
@@ -486,7 +561,9 @@ fn send_key_combo(modifiers: &[VIRTUAL_KEY], key: VIRTUAL_KEY) {
 fn uia_key_press(args: &Value) -> Value {
     let keys_str = match args.get("keys").and_then(|v| v.as_str()) {
         Some(k) => k,
-        None => return json!({"success": false, "error": "keys parameter required (e.g. 'ctrl+s', 'enter', 'alt+f4')"}),
+        None => {
+            return json!({"success": false, "error": "keys parameter required (e.g. 'ctrl+s', 'enter', 'alt+f4')"})
+        }
     };
 
     let parts: Vec<&str> = keys_str.split('+').map(|s| s.trim()).collect();
@@ -502,14 +579,18 @@ fn uia_key_press(args: &Value) -> Value {
     for m in modifier_names {
         match modifier_to_vk(m) {
             Some(vk) => modifiers.push(vk),
-            None => return json!({"success": false, "error": format!("Unknown modifier: '{}'. Use ctrl, shift, alt, win", m)}),
+            None => {
+                return json!({"success": false, "error": format!("Unknown modifier: '{}'. Use ctrl, shift, alt, win", m)})
+            }
         }
     }
 
     // Resolve main key
     let main_vk = match key_name_to_vk(main_key_name) {
         Some(vk) => vk,
-        None => return json!({"success": false, "error": format!("Unknown key: '{}'. Use named keys (enter, tab, f1-f12, etc.) or single chars (a-z, 0-9)", main_key_name)}),
+        None => {
+            return json!({"success": false, "error": format!("Unknown key: '{}'. Use named keys (enter, tab, f1-f12, etc.) or single chars (a-z, 0-9)", main_key_name)})
+        }
     };
 
     send_key_combo(&modifiers, main_vk);
@@ -645,7 +726,12 @@ fn uia_shortcut(args: &Value) -> Value {
 
     // If no app specified, list available apps
     if app.is_none() {
-        let apps: Vec<&str> = shortcuts.as_object().unwrap().keys().map(|s| s.as_str()).collect();
+        let apps: Vec<&str> = shortcuts
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|s| s.as_str())
+            .collect();
         return json!({
             "success": true,
             "mode": "list_apps",
@@ -657,11 +743,13 @@ fn uia_shortcut(args: &Value) -> Value {
     let app_name = app.unwrap().to_lowercase();
     let app_shortcuts = match shortcuts.get(&app_name) {
         Some(s) => s,
-        None => return json!({
-            "success": false,
-            "error": format!("Unknown app '{}'. Available: {:?}", app_name,
-                shortcuts.as_object().unwrap().keys().collect::<Vec<_>>())
-        }),
+        None => {
+            return json!({
+                "success": false,
+                "error": format!("Unknown app '{}'. Available: {:?}", app_name,
+                    shortcuts.as_object().unwrap().keys().collect::<Vec<_>>())
+            })
+        }
     };
 
     // If no action, list shortcuts for this app
@@ -677,12 +765,14 @@ fn uia_shortcut(args: &Value) -> Value {
     let action_name = action.unwrap().to_lowercase();
     let key_combo = match app_shortcuts.get(&action_name).and_then(|v| v.as_str()) {
         Some(k) => k.to_string(),
-        None => return json!({
-            "success": false,
-            "error": format!("Unknown action '{}' for app '{}'. Available: {:?}",
-                action_name, app_name,
-                app_shortcuts.as_object().unwrap().keys().collect::<Vec<_>>())
-        }),
+        None => {
+            return json!({
+                "success": false,
+                "error": format!("Unknown action '{}' for app '{}'. Available: {:?}",
+                    action_name, app_name,
+                    app_shortcuts.as_object().unwrap().keys().collect::<Vec<_>>())
+            })
+        }
     };
 
     // Execute the shortcut via uia_key_press
@@ -713,18 +803,38 @@ fn uia_read_value(args: &Value) -> Value {
                 match automation.GetRootElement() {
                     Ok(root) => {
                         // Collect deeper to find nested elements
-                        let all_elements_raw = collect_elements_with_values(&root, &automation, 0, 6);
+                        let all_elements_raw =
+                            collect_elements_with_values(&root, &automation, 0, 6);
 
-                        let filtered: Vec<Value> = all_elements_raw.into_iter()
+                        let filtered: Vec<Value> = all_elements_raw
+                            .into_iter()
                             .filter(|e| {
                                 let name_match = name_filter
-                                    .map(|n| e.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase().contains(&n.to_lowercase()))
+                                    .map(|n| {
+                                        e.get("name")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_lowercase()
+                                            .contains(&n.to_lowercase())
+                                    })
                                     .unwrap_or(true);
                                 let aid_match = automation_id_filter
-                                    .map(|a| e.get("automation_id").and_then(|v| v.as_str()).unwrap_or("").to_lowercase().contains(&a.to_lowercase()))
+                                    .map(|a| {
+                                        e.get("automation_id")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_lowercase()
+                                            .contains(&a.to_lowercase())
+                                    })
                                     .unwrap_or(true);
                                 let type_match = control_type_filter
-                                    .map(|t| e.get("control_type").and_then(|v| v.as_str()).unwrap_or("").to_lowercase() == t.to_lowercase())
+                                    .map(|t| {
+                                        e.get("control_type")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_lowercase()
+                                            == t.to_lowercase()
+                                    })
                                     .unwrap_or(true);
                                 name_match && aid_match && type_match
                             })
@@ -736,7 +846,9 @@ fn uia_read_value(args: &Value) -> Value {
                             "elements": filtered
                         })
                     }
-                    Err(e) => json!({"success": false, "error": format!("Root element error: {}", e)}),
+                    Err(e) => {
+                        json!({"success": false, "error": format!("Root element error: {}", e)})
+                    }
                 }
             }
         }
@@ -746,20 +858,44 @@ fn uia_read_value(args: &Value) -> Value {
 
 /// Collect elements with their text values via UIA Value and Text patterns
 #[cfg(windows)]
-fn collect_elements_with_values(element: &IUIAutomationElement, automation: &IUIAutomation, depth: u32, max_depth: u32) -> Vec<Value> {
+fn collect_elements_with_values(
+    element: &IUIAutomationElement,
+    automation: &IUIAutomation,
+    depth: u32,
+    max_depth: u32,
+) -> Vec<Value> {
     let mut results = Vec::new();
-    if depth > max_depth { return results; }
+    if depth > max_depth {
+        return results;
+    }
 
     unsafe {
-        let name = element.CurrentName().ok().map(|s| s.to_string()).unwrap_or_default();
-        let control_type_id = element.CurrentControlType().ok().unwrap_or(UIA_CONTROLTYPE_ID(0));
-        let class_name = element.CurrentClassName().ok().map(|s| s.to_string()).unwrap_or_default();
-        let automation_id = element.CurrentAutomationId().ok().map(|s| s.to_string()).unwrap_or_default();
+        let name = element
+            .CurrentName()
+            .ok()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let control_type_id = element
+            .CurrentControlType()
+            .ok()
+            .unwrap_or(UIA_CONTROLTYPE_ID(0));
+        let class_name = element
+            .CurrentClassName()
+            .ok()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let automation_id = element
+            .CurrentAutomationId()
+            .ok()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
         let control_type = control_type_to_string(control_type_id);
 
         // Try to get value via ValuePattern
         let mut value_text: Option<String> = None;
-        if let Ok(pattern) = element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId) {
+        if let Ok(pattern) =
+            element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+        {
             if let Ok(val) = pattern.CurrentValue() {
                 let s = val.to_string();
                 if !s.is_empty() {
@@ -770,7 +906,9 @@ fn collect_elements_with_values(element: &IUIAutomationElement, automation: &IUI
 
         // Try to get text via TextPattern
         let mut full_text: Option<String> = None;
-        if let Ok(pattern) = element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) {
+        if let Ok(pattern) =
+            element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+        {
             if let Ok(range) = pattern.DocumentRange() {
                 if let Ok(text) = range.GetText(4096) {
                     let s = text.to_string();
@@ -782,7 +920,11 @@ fn collect_elements_with_values(element: &IUIAutomationElement, automation: &IUI
         }
 
         // Only include elements that have a name, automation_id, or some value
-        if !name.is_empty() || !automation_id.is_empty() || value_text.is_some() || full_text.is_some() {
+        if !name.is_empty()
+            || !automation_id.is_empty()
+            || value_text.is_some()
+            || full_text.is_some()
+        {
             let mut entry = json!({
                 "name": name,
                 "control_type": control_type,
@@ -791,10 +933,16 @@ fn collect_elements_with_values(element: &IUIAutomationElement, automation: &IUI
             });
 
             if let Some(ref v) = value_text {
-                entry.as_object_mut().unwrap().insert("value".to_string(), json!(v));
+                entry
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("value".to_string(), json!(v));
             }
             if let Some(ref t) = full_text {
-                entry.as_object_mut().unwrap().insert("text".to_string(), json!(t));
+                entry
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("text".to_string(), json!(t));
             }
             results.push(entry);
         }
@@ -805,7 +953,12 @@ fn collect_elements_with_values(element: &IUIAutomationElement, automation: &IUI
                 if let Ok(length) = children.Length() {
                     for i in 0..length {
                         if let Ok(child) = children.GetElement(i) {
-                            results.extend(collect_elements_with_values(&child, automation, depth + 1, max_depth));
+                            results.extend(collect_elements_with_values(
+                                &child,
+                                automation,
+                                depth + 1,
+                                max_depth,
+                            ));
                         }
                     }
                 }
@@ -818,7 +971,10 @@ fn collect_elements_with_values(element: &IUIAutomationElement, automation: &IUI
 
 #[cfg(windows)]
 fn uia_scroll(args: &Value) -> Value {
-    let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
+    let direction = args
+        .get("direction")
+        .and_then(|v| v.as_str())
+        .unwrap_or("down");
     let amount = args.get("amount").and_then(|v| v.as_i64()).unwrap_or(3) as i32;
 
     // Use mouse wheel via SendInput - works on whatever's under the cursor
@@ -836,8 +992,8 @@ fn uia_scroll(args: &Value) -> Value {
         let wheel_delta: i32 = match direction {
             "up" => 120 * amount,
             "down" => -120 * amount,
-            "left" => -120 * amount,  // horizontal
-            "right" => 120 * amount,  // horizontal
+            "left" => -120 * amount, // horizontal
+            "right" => 120 * amount, // horizontal
             _ => -120 * amount,
         };
 
@@ -845,12 +1001,20 @@ fn uia_scroll(args: &Value) -> Value {
 
         let inputs = [INPUT {
             r#type: INPUT_MOUSE,
-            Anonymous: INPUT_0 { mi: MOUSEINPUT {
-                dx: 0, dy: 0,
-                mouseData: wheel_delta as u32,
-                dwFlags: if is_horizontal { MOUSEEVENTF_HWHEEL } else { MOUSEEVENTF_WHEEL },
-                time: 0, dwExtraInfo: 0,
-            }},
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx: 0,
+                    dy: 0,
+                    mouseData: wheel_delta as u32,
+                    dwFlags: if is_horizontal {
+                        MOUSEEVENTF_HWHEEL
+                    } else {
+                        MOUSEEVENTF_WHEEL
+                    },
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
         }];
 
         SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
@@ -869,7 +1033,7 @@ fn uia_scroll(args: &Value) -> Value {
 #[derive(Clone, Serialize)]
 struct WatchEvent {
     watch_id: String,
-    event_type: String,  // "focus_changed", "window_opened", "window_closed", "value_changed"
+    event_type: String, // "focus_changed", "window_opened", "window_closed", "value_changed"
     timestamp: u64,
     details: Value,
 }
@@ -877,9 +1041,9 @@ struct WatchEvent {
 #[derive(Clone)]
 struct Watch {
     id: String,
-    watch_type: String,  // "focus", "window_list", "element_value"
-    filter: String,       // title substring, element name, etc.
-    last_state: String,   // serialized last-seen state for diffing
+    watch_type: String, // "focus", "window_list", "element_value"
+    filter: String,     // title substring, element name, etc.
+    last_state: String, // serialized last-seen state for diffing
 }
 
 struct WatchState {
@@ -890,17 +1054,20 @@ struct WatchState {
 
 fn global_watch_state() -> &'static Mutex<WatchState> {
     static STATE: OnceLock<Mutex<WatchState>> = OnceLock::new();
-    STATE.get_or_init(|| Mutex::new(WatchState {
-        watches: Vec::new(),
-        events: VecDeque::new(),
-        watcher_running: false,
-    }))
+    STATE.get_or_init(|| {
+        Mutex::new(WatchState {
+            watches: Vec::new(),
+            events: VecDeque::new(),
+            watcher_running: false,
+        })
+    })
 }
 
 fn now_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64).unwrap_or(0)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[cfg(windows)]
@@ -908,7 +1075,9 @@ fn start_watcher_thread() {
     let state = global_watch_state();
     {
         let mut s = state.lock().unwrap();
-        if s.watcher_running { return; }
+        if s.watcher_running {
+            return;
+        }
         s.watcher_running = true;
     }
 
@@ -919,7 +1088,9 @@ fn start_watcher_thread() {
 
             let watches: Vec<Watch> = {
                 let s = global_watch_state().lock().unwrap();
-                if s.watches.is_empty() { continue; }
+                if s.watches.is_empty() {
+                    continue;
+                }
                 s.watches.clone()
             };
 
@@ -975,20 +1146,35 @@ fn check_window_list_watch(watch: &Watch) {
         // Parse old titles for diff
         let old_titles: Vec<String> = serde_json::from_str(&watch.last_state).unwrap_or_default();
 
-        let opened: Vec<&String> = current_titles.iter().filter(|t| !old_titles.contains(t)).collect();
-        let closed: Vec<&String> = old_titles.iter().filter(|t| !current_titles.contains(t)).collect();
+        let opened: Vec<&String> = current_titles
+            .iter()
+            .filter(|t| !old_titles.contains(t))
+            .collect();
+        let closed: Vec<&String> = old_titles
+            .iter()
+            .filter(|t| !current_titles.contains(t))
+            .collect();
 
         // Only emit if there's an actual open/close (not just title text change)
         if !opened.is_empty() || !closed.is_empty() {
             let filter_lower = watch.filter.to_lowercase();
             let relevant = filter_lower.is_empty()
-                || opened.iter().any(|t| t.to_lowercase().contains(&filter_lower))
-                || closed.iter().any(|t| t.to_lowercase().contains(&filter_lower));
+                || opened
+                    .iter()
+                    .any(|t| t.to_lowercase().contains(&filter_lower))
+                || closed
+                    .iter()
+                    .any(|t| t.to_lowercase().contains(&filter_lower));
 
             if relevant {
                 let event = WatchEvent {
                     watch_id: watch.id.clone(),
-                    event_type: if !opened.is_empty() { "window_opened" } else { "window_closed" }.to_string(),
+                    event_type: if !opened.is_empty() {
+                        "window_opened"
+                    } else {
+                        "window_closed"
+                    }
+                    .to_string(),
                     timestamp: now_millis(),
                     details: json!({
                         "opened": opened,
@@ -1018,10 +1204,16 @@ fn check_element_value_watch(watch: &Watch) {
 
                 for elem in &elements {
                     let name = elem.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                    if !name.to_lowercase().contains(&filter_lower) { continue; }
+                    if !name.to_lowercase().contains(&filter_lower) {
+                        continue;
+                    }
 
-                    let current_val = elem.get("value").or_else(|| elem.get("text"))
-                        .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let current_val = elem
+                        .get("value")
+                        .or_else(|| elem.get("text"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
 
                     if current_val != watch.last_state && !current_val.is_empty() {
                         let event = WatchEvent {
@@ -1074,7 +1266,7 @@ fn uia_watch(args: &Value) -> Value {
                     let windows = get_visible_windows();
                     let titles: Vec<String> = windows.iter().map(|w| w.title.clone()).collect();
                     serde_json::to_string(&titles).unwrap_or_default()
-                },
+                }
                 "element_value" => String::new(), // Will capture on first poll
                 _ => String::new(),
             };
@@ -1100,7 +1292,7 @@ fn uia_watch(args: &Value) -> Value {
                 "filter": filter,
                 "hint": "Call uia_poll_events to check for triggered events"
             })
-        },
+        }
         "remove" => {
             let watch_id = args.get("watch_id").and_then(|v| v.as_str()).unwrap_or("");
             let mut s = global_watch_state().lock().unwrap();
@@ -1112,20 +1304,26 @@ fn uia_watch(args: &Value) -> Value {
                 "removed": removed,
                 "remaining_watches": s.watches.len()
             })
-        },
+        }
         "list" => {
             let s = global_watch_state().lock().unwrap();
-            let watches: Vec<Value> = s.watches.iter().map(|w| json!({
-                "id": w.id,
-                "type": w.watch_type,
-                "filter": w.filter,
-            })).collect();
+            let watches: Vec<Value> = s
+                .watches
+                .iter()
+                .map(|w| {
+                    json!({
+                        "id": w.id,
+                        "type": w.watch_type,
+                        "filter": w.filter,
+                    })
+                })
+                .collect();
             json!({
                 "success": true,
                 "count": watches.len(),
                 "watches": watches
             })
-        },
+        }
         "clear" => {
             let mut s = global_watch_state().lock().unwrap();
             let count = s.watches.len();
@@ -1135,8 +1333,10 @@ fn uia_watch(args: &Value) -> Value {
                 "success": true,
                 "cleared": count
             })
-        },
-        _ => json!({"success": false, "error": "action must be 'add', 'remove', 'list', or 'clear'"}),
+        }
+        _ => {
+            json!({"success": false, "error": "action must be 'add', 'remove', 'list', or 'clear'"})
+        }
     }
 }
 
@@ -1151,9 +1351,7 @@ fn uia_poll_events(args: &Value) -> Value {
     let mut remaining = VecDeque::new();
 
     while let Some(event) = s.events.pop_front() {
-        let matches = watch_id_filter
-            .map(|f| event.watch_id == f)
-            .unwrap_or(true);
+        let matches = watch_id_filter.map(|f| event.watch_id == f).unwrap_or(true);
 
         if matches && events.len() < max_events {
             events.push(event);
@@ -1213,24 +1411,26 @@ fn uia_shortcut(_args: &Value) -> Value {
 #[cfg(windows)]
 fn uia_get_state(args: &Value) -> Value {
     let max_depth = args.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(3) as u32;
-    let include_invisible = args.get("include_invisible").and_then(|v| v.as_bool()).unwrap_or(false);
-    
+    let include_invisible = args
+        .get("include_invisible")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     match get_ui_automation() {
-        Ok(automation) => {
-            unsafe {
-                match automation.GetRootElement() {
-                    Ok(root) => {
-                        let elements = collect_elements(&root, &automation, 0, max_depth, include_invisible);
-                        json!({
-                            "success": true,
-                            "count": elements.len(),
-                            "elements": elements
-                        })
-                    }
-                    Err(e) => json!({"success": false, "error": format!("Root element error: {}", e)}),
+        Ok(automation) => unsafe {
+            match automation.GetRootElement() {
+                Ok(root) => {
+                    let elements =
+                        collect_elements(&root, &automation, 0, max_depth, include_invisible);
+                    json!({
+                        "success": true,
+                        "count": elements.len(),
+                        "elements": elements
+                    })
                 }
+                Err(e) => json!({"success": false, "error": format!("Root element error: {}", e)}),
             }
-        }
+        },
         Err(e) => json!({"success": false, "error": format!("UIA init error: {}", e)}),
     }
 }
@@ -1249,36 +1449,35 @@ fn uia_list_windows(_args: &Value) -> Value {
 fn uia_find_element(args: &Value) -> Value {
     let name_filter = args.get("name").and_then(|v| v.as_str());
     let type_filter = args.get("control_type").and_then(|v| v.as_str());
-    
+
     match get_ui_automation() {
-        Ok(automation) => {
-            unsafe {
-                match automation.GetRootElement() {
-                    Ok(root) => {
-                        let all_elements = collect_elements(&root, &automation, 0, 5, false);
-                        
-                        let filtered: Vec<UiElement> = all_elements.into_iter()
-                            .filter(|e| {
-                                let name_match = name_filter
-                                    .map(|n| e.name.to_lowercase().contains(&n.to_lowercase()))
-                                    .unwrap_or(true);
-                                let type_match = type_filter
-                                    .map(|t| e.control_type.to_lowercase() == t.to_lowercase())
-                                    .unwrap_or(true);
-                                name_match && type_match
-                            })
-                            .collect();
-                        
-                        json!({
-                            "success": true,
-                            "count": filtered.len(),
-                            "elements": filtered
+        Ok(automation) => unsafe {
+            match automation.GetRootElement() {
+                Ok(root) => {
+                    let all_elements = collect_elements(&root, &automation, 0, 5, false);
+
+                    let filtered: Vec<UiElement> = all_elements
+                        .into_iter()
+                        .filter(|e| {
+                            let name_match = name_filter
+                                .map(|n| e.name.to_lowercase().contains(&n.to_lowercase()))
+                                .unwrap_or(true);
+                            let type_match = type_filter
+                                .map(|t| e.control_type.to_lowercase() == t.to_lowercase())
+                                .unwrap_or(true);
+                            name_match && type_match
                         })
-                    }
-                    Err(e) => json!({"success": false, "error": format!("Root element error: {}", e)}),
+                        .collect();
+
+                    json!({
+                        "success": true,
+                        "count": filtered.len(),
+                        "elements": filtered
+                    })
                 }
+                Err(e) => json!({"success": false, "error": format!("Root element error: {}", e)}),
             }
-        }
+        },
         Err(e) => json!({"success": false, "error": format!("UIA init error: {}", e)}),
     }
 }
